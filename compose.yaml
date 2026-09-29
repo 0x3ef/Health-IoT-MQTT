@@ -1,0 +1,68 @@
+x-sensor-environment: &sensor-environment
+  NO_PROXY: gateway,localhost,127.0.0.1
+  no_proxy: gateway,localhost,127.0.0.1
+
+services:
+  mosquitto:
+    build: ./mqtt-broker
+    volumes:
+      - broker-data:/mosquitto/data
+      - broker-logs:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "lab/ready", "-n"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  postgres:
+    build: ./postgres
+    environment:
+      POSTGRES_USER: health_user
+      POSTGRES_PASSWORD: health_password
+      POSTGRES_DB: health_data
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "health_user", "-d", "health_data"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  gateway:
+    build: ./gateway
+    ports:
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:50051:50051"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+  mqtt-subscriber:
+    build: ./mqtt-subscriber
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+  sensor-rest:
+    build: ./sensor-rest
+    environment: *sensor-environment
+    depends_on:
+      - gateway
+    restart: on-failure
+  sensor-web:
+    build: ./sensor-webSocket
+    environment: *sensor-environment
+    depends_on:
+      - gateway
+    restart: on-failure
+  sensor-grpc:
+    build: ./sensor-grpc
+    environment: *sensor-environment
+    depends_on:
+      - gateway
+    restart: on-failure
+
+volumes:
+  broker-data:
+  broker-logs:
+  postgres-data:
